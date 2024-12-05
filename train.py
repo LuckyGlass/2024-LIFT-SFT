@@ -14,6 +14,9 @@ import datasets
 import numpy as np
 from peft import LoraConfig, TaskType, get_peft_model, prepare_model_for_kbit_training, PeftModel
 from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
+from lift_dataset import load_lift_dataset
+from lift_sft_trainer import LIFTSFTTrainer
+from lift_args import LIFTDataArguments
 
 IGNORE_INDEX = -100
 logger = logging.getLogger(__name__)
@@ -124,26 +127,6 @@ def preprocess(
         label[:source_len] = IGNORE_INDEX
     return dict(input_ids=input_ids, labels=labels)
 
-@dataclass
-class DataCollatorForSupervisedDataset(object):
-    """Collate examples for supervised fine-tuning."""
-    tokenizer: transformers.PreTrainedTokenizer
-
-    def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
-        input_ids, labels = tuple([instance[key] for instance in instances] for key in ("input_ids", "labels"))
-        input_ids = [torch.tensor(x) for x in input_ids]
-        input_ids = torch.nn.utils.rnn.pad_sequence(
-            input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id
-        )
-        labels = [torch.tensor(x) for x in labels]
-        labels = torch.nn.utils.rnn.pad_sequence(labels, batch_first=True, padding_value=IGNORE_INDEX)
-        
-        return dict(
-            input_ids=input_ids,
-            labels=labels,
-            attention_mask=input_ids.ne(self.tokenizer.pad_token_id),
-        )
-
 def train_tokenize_function(examples, tokenizer, query, response):
     sources = [PROMPT.format_map(dict(instruction=instruction)) for instruction in examples[query]]
     targets = [f"{output}\n{tokenizer.eos_token}" for output in examples[response]]
@@ -202,8 +185,8 @@ def build_model(script_args, checkpoint_dir):
     return model
 
 def train():
-    parser = transformers.HfArgumentParser(TrainingArguments)
-    script_args = parser.parse_args_into_dataclasses()[0]
+    parser = transformers.HfArgumentParser((TrainingArguments, LIFTDataArguments))
+    script_args, data_args = parser.parse_args_into_dataclasses()[0]
     log_level = script_args.get_process_log_level()
     logger.setLevel(log_level)
     datasets.utils.logging.set_verbosity(log_level)
@@ -230,36 +213,21 @@ def train():
     
     resume_from_checkpoint_dir = get_last_checkpoint(script_args.output_dir)
     model = build_model(script_args, resume_from_checkpoint_dir)
-        
-    raw_train_datasets = load_dataset(script_args.data_path, split=script_args.dataset_split)
 
     if script_args.local_rank > 0: 
         torch.distributed.barrier()
-        
-    train_dataset = raw_train_datasets.map(
-        train_tokenize_function,
-        batched=True,
-        batch_size=3000,
-        num_proc=32,
-        remove_columns=raw_train_datasets.column_names,
-        load_from_cache_file=True,
-        desc="Running tokenizer on train dataset",
-        fn_kwargs={"tokenizer": tokenizer, "query": script_args.dataset_field[0], "response": script_args.dataset_field[1]}
-    )
 
-        
+    data_modules = load_lift_dataset(tokenizer, data_args, script_args.model_max_length)
+
     if script_args.local_rank == 0:
         torch.distributed.barrier()
         print(model)
-        logger.info("Training dataset samples:", len(train_dataset))
-        for index in random.sample(range(len(train_dataset)), 3):
-            logger.info(f"Sample {index} of the training set: {train_dataset[index]['input_ids']}, {train_dataset[index]['labels']}.")
-            logger.info(f"Sample {index} of the training set: {tokenizer.decode(list(train_dataset[index]['input_ids']))}.")
+        logger.info("Training dataset samples:", len(data_modules['train_dataset']))
+        for index in random.sample(range(len(data_modules['train_dataset'])), 3):
+            logger.info(f"Sample {index} of the training set: {data_modules['train_dataset'][index]['input_ids']}, {data_modules['train_dataset'][index]['labels']}.")
+            logger.info(f"Sample {index} of the training set: {tokenizer.decode(list(data_modules['train_dataset'][index]['input_ids']))}.")
 
-    data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer)
-    data_module = dict(train_dataset=train_dataset, eval_dataset=None, data_collator=data_collator)
-
-    trainer = Trainer(model=model, tokenizer=tokenizer, args=script_args, **data_module)
+    trainer = LIFTSFTTrainer(model=model, tokenizer=tokenizer, args=script_args, **data_modules)
     if not script_args.full_finetune:
         trainer.add_callback(SavePeftModelCallback)
     trainer.train(resume_from_checkpoint = resume_from_checkpoint_dir)
