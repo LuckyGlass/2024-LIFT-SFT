@@ -31,23 +31,19 @@ PROMPT = (
 class TrainingArguments(transformers.TrainingArguments):
     # Base model or residual model setting
     model_name_or_path: Optional[str] = field(default="meta-llama/Meta-Llama-3-8B")
-    attn_implementation : Optional[str] = field(default="flash_attention_2")
+    attn_implementation: Optional[str] = field(default="flash_attention_2")
     # Lora or PiSSA setting
-    full_finetune : Optional[bool] = field(default=True)
+    full_finetune: Optional[bool] = field(default=True)
     adapter_name_or_path: Optional[str] = field(default=None,metadata={"help": ("Pre-initialized PiSSA adapter path; when this is not None, the following arguments are ignored."),},)
     init_weights: bool | str = field(default=True,metadata={"help": ("True -> LoRA; `pissa` -> PiSSA; `pissa_niter_16` -> Fast SVD PiSSA"),},)
-    target_modules : Optional[str] = field(default="q_proj,v_proj,k_proj,o_proj,gate_proj,down_proj,up_proj")
-    lora_rank : Optional[int] = field(default=8)
-    lora_alpha : Optional[float] = field(default=32.)
-    lora_dropout : Optional[float] = field(default=0.,metadata={"help": ("Must be set to 0 when using PiSSA."),},)
+    target_modules: Optional[str] = field(default="q_proj,v_proj,k_proj,o_proj,gate_proj,down_proj,up_proj")
+    lora_rank: Optional[int] = field(default=8)
+    lora_alpha: Optional[float] = field(default=32.)
+    lora_dropout: Optional[float] = field(default=0.,metadata={"help": ("Must be set to 0 when using PiSSA."),},)
     # Quantization setting
     bits: int = field(default=16,metadata={"help": "How many bits to use."})
     double_quant: bool = field(default=True,metadata={"help": "Compress the quantization statistics through double quantization."})
     quant_type: str = field(default="nf4",metadata={"help": "Quantization data type to use. Should be one of `fp4` or `nf4`."})
-    # DataArguments:
-    data_path: str = field(default=None, metadata={"help": "Path to the training data."})
-    dataset_split: str = field(default="train[:100000]", metadata={"help": "(`['train', 'test', 'eval']`):"})
-    dataset_field: List[str] = field(default=None, metadata={"help": "Fields of dataset input and output."})
     # TrainingArguments
     optim: str = field(default="adamw_torch")
     model_max_length: int = field(default=512,metadata={"help": "Maximum sequence length. Sequences will be right padded (and possibly truncated)."},)
@@ -186,7 +182,7 @@ def build_model(script_args, checkpoint_dir):
 
 def train():
     parser = transformers.HfArgumentParser((TrainingArguments, LIFTDataArguments))
-    script_args, data_args = parser.parse_args_into_dataclasses()[0]
+    script_args, data_args = parser.parse_args_into_dataclasses()
     log_level = script_args.get_process_log_level()
     logger.setLevel(log_level)
     datasets.utils.logging.set_verbosity(log_level)
@@ -227,6 +223,7 @@ def train():
             logger.info(f"Sample {index} of the training set: {data_modules['train_dataset'][index]['input_ids']}, {data_modules['train_dataset'][index]['labels']}.")
             logger.info(f"Sample {index} of the training set: {tokenizer.decode(list(data_modules['train_dataset'][index]['input_ids']))}.")
 
+    script_args.accelerator_config.even_batches = False
     trainer = LIFTSFTTrainer(model=model, tokenizer=tokenizer, args=script_args, **data_modules)
     if not script_args.full_finetune:
         trainer.add_callback(SavePeftModelCallback)
