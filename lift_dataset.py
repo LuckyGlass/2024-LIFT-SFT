@@ -16,7 +16,7 @@ BAMBOO_FORMAT = "Given a long text, and {num_events} events which take place in 
 class LIFTSFTDataset(Dataset):
     """Dataset for long-context time-line-reorder task SFT."""
 
-    def __init__(self, data_path: str, tokenizer: transformers.PreTrainedTokenizer, len_segment: int, len_offset: int, block_size: int, model_max_length: int, cache_path: Optional[str]=None):
+    def __init__(self, data_path: str, tokenizer: transformers.PreTrainedTokenizer, len_segment: int, len_offset: int, block_size: int, model_max_length: int, cache_path: Optional[str]=None, ignore_index: int=-1):
         super().__init__()
         if cache_path is not None and os.path.exists(cache_path):
             with open(cache_path, 'rb') as f:
@@ -63,7 +63,7 @@ class LIFTSFTDataset(Dataset):
                         input_ids = torch.concat((input_ids[:model_max_length//2], input_ids[-model_max_length//2:]), dim=-1)
                         input_length = len(input_ids) - output_length
                     labels = input_ids.clone()
-                    labels[:input_length] = -1
+                    labels[:input_length] = ignore_index
 
                     assert input_ids.shape[-1] <= model_max_length
                     self.input_ids.append(input_ids)
@@ -91,13 +91,14 @@ class DataCollatorForSupervisedDataset(object):
     """Collate examples for supervised fine-tuning."""
 
     tokenizer: transformers.PreTrainedTokenizer
+    ignore_index: int = -1
 
     def __call__(self, instances: Sequence[Dict]) -> Dict[str, torch.Tensor]:
         input_ids, labels = tuple([instance[key] for instance in instances] for key in ("input_ids", "labels"))
         input_ids = torch.nn.utils.rnn.pad_sequence(
             input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id
         )
-        labels = torch.nn.utils.rnn.pad_sequence(labels, batch_first=True, padding_value=-1)
+        labels = torch.nn.utils.rnn.pad_sequence(labels, batch_first=True, padding_value=self.ignore_index)
         return dict(
             input_ids=input_ids,
             labels=labels,
@@ -116,5 +117,5 @@ def load_lift_dataset(tokenizer: transformers.PreTrainedTokenizer, data_args: LI
         model_max_length=model_max_length,
         cache_path=data_args.input_cache_path
     )
-    data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer)
+    data_collator = DataCollatorForSupervisedDataset(tokenizer=tokenizer, ignore_index=data_args.ignore_index)
     return dict(train_dataset=train_dataset, eval_dataset=None, data_collator=data_collator)

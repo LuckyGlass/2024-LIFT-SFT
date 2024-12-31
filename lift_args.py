@@ -8,3 +8,4 @@ class LIFTDataArguments:
     len_offset: int = field(default=1)
     block_size: int = field(default=1024)
     input_cache_path: Optional[str] = field(default=None)
+    ignore_index: int = field(default=-1)

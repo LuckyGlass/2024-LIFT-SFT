@@ -16,7 +16,7 @@ PORT=$((1024 + RANDOM % (65535 - 1024 + 1)))
 wandb login --relogin 7cb3dada5935174b3d1b35a051f0e5cabc2d7be1
 wandb login
 
-deepspeed --master_port=${PORT} --include=localhost:0,1,2,3,4,5 train.py \
+deepspeed --master_port=${PORT} --include=localhost:0,1,2,3,4,5,6,7 train.py \
     --deepspeed configs/ds_config_zero2_no_offload.json \
     --model_name_or_path ${BASE_MODEL} \
     --full_finetune True \
@@ -28,8 +28,8 @@ deepspeed --master_port=${PORT} --include=localhost:0,1,2,3,4,5 train.py \
     --output_dir ${OUTPUT_PATH} \
     --num_train_epochs 3 \
     --model_max_length 8000 \
-    --per_device_train_batch_size 4 \
-    --gradient_accumulation_steps 4 \
+    --per_device_train_batch_size 1 \
+    --gradient_accumulation_steps 8 \
     --save_strategy epoch \
     --learning_rate 2e-5 \
     --weight_decay 0. \
@@ -37,4 +37,6 @@ deepspeed --master_port=${PORT} --include=localhost:0,1,2,3,4,5 train.py \
     --logging_steps 1 \
     --lr_scheduler_type "cosine" \
     --report_to wandb \
-    --run_name LIFTSFT-refine-1205
+    --run_name LIFTSFT-refine-1205 \
+    --bf16 True \
+    --ignore_index -100

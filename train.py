@@ -17,6 +17,7 @@ from transformers.trainer_utils import PREFIX_CHECKPOINT_DIR
 from lift_dataset import load_lift_dataset
 from lift_sft_trainer import LIFTSFTTrainer
 from lift_args import LIFTDataArguments
+from typing import Union
 
 IGNORE_INDEX = -100
 logger = logging.getLogger(__name__)
@@ -35,7 +36,7 @@ class TrainingArguments(transformers.TrainingArguments):
     # Lora or PiSSA setting
     full_finetune: Optional[bool] = field(default=True)
     adapter_name_or_path: Optional[str] = field(default=None,metadata={"help": ("Pre-initialized PiSSA adapter path; when this is not None, the following arguments are ignored."),},)
-    init_weights: bool | str = field(default=True,metadata={"help": ("True -> LoRA; `pissa` -> PiSSA; `pissa_niter_16` -> Fast SVD PiSSA"),},)
+    init_weights: Union[bool, str] = field(default=True,metadata={"help": ("True -> LoRA; `pissa` -> PiSSA; `pissa_niter_16` -> Fast SVD PiSSA"),},)
     target_modules: Optional[str] = field(default="q_proj,v_proj,k_proj,o_proj,gate_proj,down_proj,up_proj")
     lora_rank: Optional[int] = field(default=8)
     lora_alpha: Optional[float] = field(default=32.)
@@ -209,6 +210,8 @@ def train():
     
     resume_from_checkpoint_dir = get_last_checkpoint(script_args.output_dir)
     model = build_model(script_args, resume_from_checkpoint_dir)
+    if len(tokenizer) > model.get_input_embeddings().weight.shape[0]:
+        model.resize_token_embeddings(len(tokenizer))
 
     if script_args.local_rank > 0: 
         torch.distributed.barrier()
@@ -239,3 +242,4 @@ def train():
 
 if __name__ == "__main__":
     train()
+
